@@ -48,6 +48,7 @@ Graph Crawler::crawl(std::string initial_url_string, bool display_results) {
 }
 
 void Crawler::enqueue(Uri uri) {
+    
     this->queue_mutex.lock();
 
     if (this->graph.containsUri(uri)) {
@@ -97,10 +98,11 @@ bool Crawler::uri_should_be_crawled_as_node(Uri uri) {
 //        return false;
 //    }
 
-    std::vector<std::string> filetype_list = {"pdf", "jpg", "gif", "js", "css", "png"};
+    std::vector<std::string> filetype_list = {"pdf", "jpg", "gif", "js", "css", "png", "svg"};
 
     u_long i = uri.path.find_last_of('.');
-    if (i > 0) {
+    
+    if (i > 0 && i != std::string::npos) {
         std::string extension = uri.path.substr(i+1, uri.path.length());
 
         if (std::find(filetype_list.begin(), filetype_list.end(), extension) != filetype_list.end()) {
@@ -124,7 +126,7 @@ void Crawler::crawl_with_get_request(Uri uri) {
         for (Uri uri_ : this->graph.parents(uri)) {
             parent_uri = uri_; break;
         }
-        sprintf(msg, "When crawling %s, got a %d (linked from %s)", uri.to_string().c_str(), http_code, parent_uri.to_string().c_str());
+        printf(msg, "When crawling %s, got a %d (linked from %s)", uri.to_string().c_str(), http_code, parent_uri.to_string().c_str());
 
         node->node_status = FAILURE;
         note_error(std::string(msg));
@@ -133,6 +135,7 @@ void Crawler::crawl_with_get_request(Uri uri) {
         // todo: require that the response type was text/something
 
         for (Uri neighbor_uri : HtmlHelper::get_neighbors(result.response_body, uri, &this->errors)) {
+            printf("Add neighbor %s", neighbor_uri.to_string().c_str());
             graph.add_neighbor(uri, neighbor_uri);
             enqueue(neighbor_uri);
         }
@@ -144,7 +147,7 @@ void Crawler::crawl_with_get_request(Uri uri) {
 
 void Crawler::crawl_with_head_request(Uri uri) {
     std::shared_ptr<PageNode> node = this->graph.get(uri);
-    node->request_type = GET;
+    node->request_type = HEAD;
 
     CurlResult result = CurlWrapper::request(uri.to_string(), HEAD);
     int http_code = result.response_code;
@@ -159,19 +162,20 @@ void Crawler::crawl_with_head_request(Uri uri) {
 
         note_error(std::string(msg));
         node->node_status = FAILURE;
-        if (http_code != 0) {
-            finalize_crawl(uri);
-        }
+        
     } else {
-        finalize_crawl(uri);
         node->node_status = SUCCESS;
     }
+    
+    finalize_crawl(uri);
 }
 
 void Crawler::finalize_crawl(Uri uri) {
     std::cout << uri.to_string() << std::endl;
+    currently_being_explored_mutex.lock();
     currently_being_explored.erase(uri);
-
+    currently_being_explored_mutex.unlock();
+    
     if (queue.empty()) {
         number_of_running_threads --;
     } else {
